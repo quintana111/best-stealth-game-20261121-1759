@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE BRASS LEDGER — a stealth game</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1280px; height:720px; overflow:hidden; background:#07060f; font-family: Georgia,'Times New Roman',serif; }
+  #wrap { position:relative; width:1280px; height:720px; }
+  canvas { display:block; width:1280px; height:720px; }
+  #hud { position:absolute; top:0; left:0; width:1280px; height:46px; display:flex; align-items:center;
+    background:linear-gradient(180deg, rgba(10,8,24,.96), rgba(10,8,24,.82)); border-bottom:1px solid #6b5a2a;
+    color:#e8d9a8; padding:0 14px; gap:18px; z-index:5; }
+  #hud .title { font-size:20px; letter-spacing:3px; color:#f2c14e; font-weight:bold; white-space:nowrap; }
+  #hud .title span { color:#e8d9a8; font-size:11px; letter-spacing:2px; display:block; }
+  #hud .obj { flex:1; text-align:center; font-size:14px; font-style:italic; color:#d8c88f; }
+  #hud .obj b { color:#f2c14e; font-style:normal; }
+  .pill { padding:4px 12px; border-radius:20px; font-size:12px; letter-spacing:2px; font-weight:bold; border:1px solid #888; }
+  .pill.hidden { color:#9fe8b0; border-color:#3f9e58; background:#0d2b16; }
+  .pill.shadow { color:#b9c8ff; border-color:#5a6fc0; background:#101a3a; }
+  .pill.susp { color:#ffc46b; border-color:#c08a1e; background:#2b1d05; }
+  .pill.spot { color:#ff8f8f; border-color:#c0392b; background:#2b0a0a; animation:blink .5s infinite alternate; }
+  @keyframes blink { from{opacity:1} to{opacity:.55} }
+  #hud .stat { font-size:13px; color:#e8d9a8; white-space:nowrap; }
+  #hud .stat b { color:#f2c14e; }
+  #legend { position:absolute; top:56px; right:10px; width:238px; z-index:5; background:rgba(8,6,20,.88);
+    border:1px solid #6b5a2a; border-radius:8px; padding:10px 12px; color:#d8cbb0; font-size:12px; line-height:1.5; }
+  #legend h3 { color:#f2c14e; font-size:12px; letter-spacing:3px; margin-bottom:6px; border-bottom:1px solid #4a3d1c; padding-bottom:4px; }
+  #legend .row { display:flex; gap:8px; margin:3px 0; align-items:flex-start; }
+  #legend .sw { flex:0 0 16px; height:16px; border-radius:3px; margin-top:1px; }
+  #footer { position:absolute; bottom:0; left:0; width:1280px; height:34px; z-index:5; display:flex; align-items:center; justify-content:center; gap:22px;
+    background:linear-gradient(0deg, rgba(10,8,24,.96), rgba(10,8,24,.75)); border-top:1px solid #6b5a2a; color:#cbbd8f; font-size:12px; }
+  #footer b { color:#f2c14e; background:#241a08; border:1px solid #6b5a2a; border-radius:4px; padding:1px 6px; font-family:monospace; }
+  #overlay { position:absolute; inset:0; z-index:8; display:none; align-items:center; justify-content:center; background:rgba(5,3,12,.72); }
+  #overlay .card { text-align:center; background:#120d24; border:2px solid #f2c14e; border-radius:12px; padding:28px 44px; color:#e8d9a8; }
+  #overlay .card h1 { color:#f2c14e; letter-spacing:4px; font-size:30px; margin-bottom:10px; }
+  #overlay .card p { font-size:15px; margin:4px 0; }
+  #overlay .card .keys { margin-top:14px; font-size:13px; color:#cbbd8f; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="1280" height="720"></canvas>
+  <div id="hud">
+    <div class="title">THE BRASS LEDGER<span>CLOCKMAKER'S ARCHIVE &middot; NIGHT SHIFT</span></div>
+    <div class="obj" id="objective">Steal the <b>Brass Ledger</b> — then reach the EXIT unseen.</div>
+    <div class="pill hidden" id="statePill">HIDDEN</div>
+    <div class="stat">Loot <b id="loot">0/5</b></div>
+    <div class="stat">Coins <b id="coins">3</b> &middot; Smoke <b id="smoke">1</b></div>
+    <div class="stat">⏱ <b id="timer">0:00</b></div>
+  </div>
+  <div id="legend">
+    <h3>FIELD NOTES</h3>
+    <div class="row"><div class="sw" style="background:rgba(242,193,78,.45);border:1px solid #f2c14e"></div><span><b style="color:#f2c14e">Vision cone</b> — a guard sees you inside it, if nothing blocks the view.</span></div>
+    <div class="row"><div class="sw" style="background:#3a2a14;border:1px solid #8a6d3b"></div><span><b style="color:#e8c88a">Crates</b> — block sight and movement. Slip behind one.</span></div>
+    <div class="row"><div class="sw" style="background:repeating-linear-gradient(45deg,#0a0f24 0 3px,#141b3d 3px 6px);border:1px solid #33407a"></div><span><b style="color:#b9c8ff">Shadow</b> — hatched dark floor. You are hard to spot here.</span></div>
+    <div class="row"><div class="sw" style="background:radial-gradient(circle,#ffe9a8,#8a6d1e);border:1px solid #f2c14e"></div><span><b style="color:#ffe9a8">Lamplight</b> — seen from across the room. Cross it fast.</span></div>
+    <div class="row"><div class="sw" style="background:#0d5c2e;border:1px solid #4be07a"></div><span><b style="color:#7de8a0">EXIT</b> — opens only once the Ledger is yours.</span></div>
+    <div class="row"><div class="sw" style="background:#f2c14e;transform:rotate(45deg) scale(.7)"></div><span><b style="color:#f2c14e">Brass Ledger</b> — the prize, on its pedestal in the east wing.</span></div>
+    <div style="margin-top:6px;border-top:1px solid #4a3d1c;padding-top:6px;font-style:italic">“The clockmaker counts every tick. Make none of them yours.”</div>
+  </div>
+  <div id="footer">
+    <span><b>WASD / ←↑↓→</b> move</span><span><b>SHIFT</b> sneak</span><span><b>CLICK</b> throw coin</span>
+    <span><b>Q</b> smoke</span><span><b>E</b> take</span><span><b>R</b> retry</span><span><b>M</b> mute</span><span><b>ESC</b> pause</span>
+  </div>
+  <div id="overlay"><div class="card" id="ovCard"></div></div>
+</div>
+<script>
+'use strict';
+const cv = document.getElementById('game'), ctx = cv.getContext('2d');
+const W = 1280, H = 720;
+const params = new URLSearchParams(location.search);
+const SHOT = params.get('shot') || '';
+const DEMO = params.get('demo') === '1';
+
+// ---------- map (rects, px) ----------
+const WALLS = [
+  {x:0,y:0,w:1280,h:40},{x:0,y:680,w:1280,h:40},{x:0,y:0,w:40,h:720},{x:1240,y:0,w:40,h:720},
+  {x:400,y:40,w:40,h:280},{x:400,y:400,w:40,h:280},
+  {x:840,y:40,w:40,h:280},{x:840,y:400,w:40,h:280},
+  {x:440,y:320,w:160,h:40},{x:680,y:320,w:160,h:40},
+];
+const CRATES = [
+  {x:250,y:180,w:44,h:44},{x:250,y:500,w:44,h:44},{x:580,y:150,w:44,h:44},
+  {x:700,y:520,w:44,h:44},{x:980,y:180,w:44,h:44},{x:1000,y:540,w:44,h:44},
+];
+const SOLIDS = WALLS.concat(CRATES);
+const SHADOWS = [
+  {x:120,y:420,w:180,h:120},{x:520,y:80,w:160,h:110},{x:940,y:420,w:180,h:120},{x:620,y:180,w:140,h:90},
+];
+const LAMPS = [ {x:280,y:120,r:120}, {x:640,y:560,r:130}, {x:1060,y:140,r:120} ];
+const EXIT = {x:1130,y:600,w:80,h:60};
+const PEDESTAL = {x:980,y:260};
+const COIN_SPOTS = [ {x:200,y:600},{x:620,y:120},{x:700,y:600},{x:1150,y:550},{x:950,y:480} ];
+const SPAWN = {x:100,y:100};
+
+// ---------- state ----------
+let player, guards, coins, hasLedger, loot, throwCoins, smokes, suspicion, state, statusText;
+let timeSec, caught, won, paused, muted, smokeTimer, demoStep, demoPath, noiseRings, coinThrows;
+let lastTs = 0, sndCtx = null;
+
+function freshState() {
+  player = { x:SPAWN.x, y:SPAWN.y, r:13, fx:1, fy:0, sneak:false, moving:false };
+  guards = [
+    mkGuard('Corridor', [[200,380],[640,380],[1100,380]]),
+    mkGuard('West Wing', [[180,120],[180,600],[320,600],[320,120]]),
+    mkGuard('East Wing', [[950,120],[1150,120],[1150,500],[950,500]]),
+  ];
+  coins = COIN_SPOTS.map(c => ({x:c.x, y:c.y, taken:false}));
+  hasLedger = false; loot = 0; throwCoins = 3; smokes = 1;
+  suspicion = 0; state = 'hidden'; statusText = 'HIDDEN';
+  timeSec = 0; caught = false; won = false; paused = false; smokeTimer = 0;
+  noiseRings = []; coinThrows = [];
+  demoStep = 0;
+  demoPath = [ {x:200,y:380},{x:620,y:380},{x:620,y:200},{x:620,y:380},{x:950,y:380},{x:980,y:260},{x:980,y:380},{x:1150,y:380},{x:1150,y:620} ];
+  document.getElementById('overlay').style.display = 'none';
+  updateHUD();
+}
+function mkGuard(name, wps) {
+  return { name, wps, wi:0, x:wps[0][0], y:wps[0][1], fx:1, fy:0, mode:'patrol',
+    susp:0, invX:0, invY:0, invT:0, lostT:0, lookT:0, speed:70, alert:false };
+}
+
+// ---------- helpers ----------
+function rectHit(x, y, r) {
+  for (const s of SOLIDS) {
+    if (x + r > s.x && x - r < s.x + s.w && y + r > s.y && y - r < s.y + s.h) return true;
+  }
+  return false;
+}
+function segBlocked(x1, y1, x2, y2) {
+  // sample the segment; blocked if any sample point is inside a solid
+  const d = Math.hypot(x2 - x1, y2 - y1), n = Math.ceil(d / 8);
+  for (let i = 1; i < n; i++) {
+    const t = i / n, x = x1 + (x2 - x1) * t, y = y1 + (y2 - y1) * t;
+    for (const s of SOLIDS) if (x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h) return true;
+  }
+  return false;
+}
+function inShadow(x, y) { return SHADOWS.some(s => x > s.x && x < s.x + s.w && y > s.y && y < s.y + s.h); }
+function inLamp(x, y) { return LAMPS.some(l => Math.hypot(x - l.x, y - l.y) < l.r); }
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function angDiff(a, b) { let d = a - b; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return Math.abs(d); }
+
+// ---------- audio (WebAudio beeps only) ----------
+function beep(freq, dur, type, vol) {
+  if (muted) return;
+  try {
+    sndCtx = sndCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = sndCtx.createOscillator(), g = sndCtx.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol || 0.08, sndCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, sndCtx.currentTime + dur);
+    o.connect(g); g.connect(sndCtx.destination); o.start(); o.stop(sndCtx.currentTime + dur);
+  } catch (e) { /* audio unavailable */ }
+}
+
+// ---------- input ----------
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === 'r' || e.key === 'R') freshState();
+  if (e.key === 'm' || e.key === 'M') { muted = !muted; }
+  if (e.key === 'Escape') { paused = !paused; }
+  if (e.key === 'q' || e.key === 'Q') useSmoke();
+  if (e.key === 'e' || e.key === 'E') tryTake();
+  if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase())) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+cv.addEventListener('mousedown', e => {
+  const r = cv.getBoundingClientRect();
+  const tx = (e.clientX - r.left) * (W / r.width), ty = (e.clientY - r.top) * (H / r.height);
+  throwCoin(tx, ty);
+});
+function throwCoin(tx, ty) {
+  if (caught || won || paused || throwCoins <= 0) return;
+  throwCoins--;
+  coinThrows.push({ x: tx, y: ty, t: 0 });
+  noiseRings.push({ x: tx, y: ty, r: 8, max: 110, a: 0.9 });
+  beep(1200, 0.08, 'square', 0.05);
+  for (const g of guards) {
+    if (g.mode !== 'chase') { g.mode = 'investigate'; g.invX = tx; g.invY = ty; g.invT = 0; }
+  }
+  updateHUD();
+}
+function useSmoke() {
+  if (caught || won || paused || smokes <= 0 || smokeTimer > 0) return;
+  smokes--; smokeTimer = 3;
+  noiseRings.push({ x: player.x, y: player.y, r: 10, max: 150, a: 0.8 });
+  beep(300, 0.3, 'sawtooth', 0.06);
+  updateHUD();
+}
+function tryTake() {
+  if (Math.hypot(player.x - PEDESTAL.x, player.y - PEDESTAL.y) < 46 && !hasLedger) {
+    hasLedger = true; beep(880, 0.15, 'sine', 0.1); setTimeout(() => beep(1320, 0.2, 'sine', 0.1), 120);
+    document.getElementById('objective').innerHTML = 'Ledger secured — reach the <b>EXIT</b> unseen.';
+    updateHUD();
+  }
+}
+
+// ---------- update ----------
+function moveEntity(e, dx, dy, r) {
+  if (!rectHit(e.x + dx, e.y, r)) e.x += dx;
+  if (!rectHit(e.x, e.y + dy, r)) e.y += dy;
+}
+function update(dt) {
+  if (caught || won || paused) return;
+  timeSec += dt;
+  if (smokeTimer > 0) smokeTimer -= dt;
+
+  // player
+  let mx = (keys['d'] || keys['arrowright'] ? 1 : 0) - (keys['a'] || keys['arrowleft'] ? 1 : 0);
+  let my = (keys['s'] || keys['arrowdown'] ? 1 : 0) - (keys['w'] || keys['arrowup'] ? 1 : 0);
+  if (DEMO && !SHOT) {
+    const tgt = demoPath[Math.min(demoStep, demoPath.length - 1)];
+    const dx = tgt.x - player.x, dy = tgt.y - player.y, d = Math.hypot(dx, dy);
+    if (d < 14) { demoStep++; }
+    else { mx = dx / d; my = dy / d; }
+  }
+  const len = Math.hypot(mx, my) || 1;
+  player.sneak = !!keys['shift'];
+  const speed = player.sneak ? 90 : 170;
+  player.moving = (mx !== 0 || my !== 0);
+  if (player.moving) {
+    player.fx = mx / len; player.fy = my / len;
+    moveEntity(player, mx / len * speed * dt, my / len * speed * dt, player.r);
+    if (!player.sneak && Math.random() < dt * 6)
+      noiseRings.push({ x: player.x, y: player.y, r: 6, max: 70, a: 0.5 });
+  }
+  // pickups
+  for (const c of coins) {
+    if (!c.taken && Math.hypot(player.x - c.x, player.y - c.y) < 26) {
+      c.taken = true; loot++; beep(1568, 0.09, 'sine', 0.09); updateHUD();
+    }
+  }
+  if (!hasLedger && Math.hypot(player.x - PEDESTAL.x, player.y - PEDESTAL.y) < 34) tryTake();
+  // win
+  if (hasLedger && player.x > EXIT.x && player.x < EXIT.x + EXIT.w && player.y > EXIT.y && player.y < EXIT.y + EXIT.h) {
+    won = true; showOverlay('win'); beep(523, .18, 'sine', .1); setTimeout(() => beep(784, .25, 'sine', .1), 160); setTimeout(() => beep(1046, .4, 'sine', .1), 340);
+  }
+  // noise rings
+  for (const n of noiseRings) { n.r += 90 * dt; n.a -= dt * 1.4; }
+  noiseRings = noiseRings.filter(n => n.a > 0 && n.r < n.max);
+
+  // guards
+  let maxSusp = 0, anySeen = false, anyChase = false;
+  for (const g of guards) {
+    const d = Math.hypot(player.x - g.x, player.y - g.y);
+    const ang = Math.atan2(player.y - g.y, player.x - g.x);
+    const facing = Math.atan2(g.fy, g.fx);
+    let range = 230;
+    if (inLamp(player.x, player.y)) range = 300;
+    if (inShadow(player.x, player.y)) range = 120;
+    if (player.sneak) range -= 40;
+    const seen = smokeTimer <= 0 && d < range && angDiff(ang, facing) < 0.56 && !segBlocked(g.x, g.y, player.x, player.y);
+    if (seen) {
+      anySeen = true;
+      let rate = inShadow(player.x, player.y) ? 14 : (inLamp(player.x, player.y) ? 70 : 42);
+      if (player.sneak) rate *= 0.55;
+      g.susp = Math.min(100, g.susp + rate * dt);
+      g.invX = player.x; g.invY = player.y;
+      if (g.susp >= 100 && g.mode !== 'chase') { g.mode = 'chase'; g.lostT = 0; beep(220, .3, 'sawtooth', .1); }
+    } else {
+      g.susp = Math.max(0, g.susp - 22 * dt);
+    }
+    maxSusp = Math.max(maxSusp, g.susp);
+    // movement by mode
+    if (g.mode === 'chase') {
+      anyChase = true;
+      if (!seen) { g.lostT += dt; if (g.lostT > 3) { g.mode = 'investigate'; g.invT = 0; } }
+      else g.lostT = 0;
+      stepGuard(g, player.x, player.y, 155, dt);
+      if (d < 26) { caught = true; showOverlay('caught'); beep(110, .5, 'sawtooth', .12); }
+    } else if (g.mode === 'investigate') {
+      const dd = Math.hypot(g.invX - g.x, g.invY - g.y);
+      if (dd > 12) stepGuard(g, g.invX, g.invY, 115, dt);
+      else { g.invT += dt; g.fx = Math.cos(g.invT * 1.5); g.fy = Math.sin(g.invT * 1.5); if (g.invT > 2.5) { g.mode = 'patrol'; } }
+    } else {
+      const wp = g.wps[g.wi];
+      const dd = Math.hypot(wp[0] - g.x, wp[1] - g.y);
+      if (dd < 10) g.wi = (g.wi + 1) % g.wps.length;
+      else stepGuard(g, wp[0], wp[1], 70, dt);
+    }
+  }
+  suspicion = maxSusp;
+  state = anyChase ? 'spot' : (anySeen ? (maxSusp > 55 ? 'susp' : 'susp') : (inShadow(player.x, player.y) ? 'shadow' : 'hidden'));
+  statusText = anyChase ? 'SPOTTED!' : (maxSusp > 25 ? 'SUSPICIOUS ?' : (inShadow(player.x, player.y) ? 'IN SHADOW' : 'HIDDEN'));
+  updateHUD();
+}
+function stepGuard(g, tx, ty, spd, dt) {
+  const dx = tx - g.x, dy = ty - g.y, d = Math.hypot(dx, dy) || 1;
+  g.fx = dx / d; g.fy = dy / d;
+  moveEntity(g, dx / d * spd * dt, dy / d * spd * dt, 13);
+}
+function updateHUD() {
+  document.getElementById('loot').textContent = loot + '/5';
+  document.getElementById('coins').textContent = throwCoins;
+  document.getElementById('smoke').textContent = smokes;
+  const m = Math.floor(timeSec / 60), s = Math.floor(timeSec % 60);
+  document.getElementById('timer').textContent = m + ':' + String(s).padStart(2, '0');
+  const pill = document.getElementById('statePill');
+  pill.textContent = statusText;
+  pill.className = 'pill ' + (state === 'spot' ? 'spot' : state === 'susp' ? 'susp' : state === 'shadow' ? 'shadow' : 'hidden');
+}
+function showOverlay(kind) {
+  const ov = document.getElementById('overlay'), card = document.getElementById('ovCard');
+  if (kind === 'win') {
+    card.innerHTML = '<h1>LEDGER SECURED</h1><p>You slipped out of the Clockmaker’s Archive unseen.</p><p>Time ' + document.getElementById('timer').textContent + ' &middot; Loot ' + loot + '/5 coins</p><div class="keys">Press <b>R</b> to play again</div>';
+  } else {
+    card.innerHTML = '<h1 style="color:#ff8f8f">SPOTTED!</h1><p>The guard raised the alarm. The Ledger stays locked away… this time.</p><div class="keys">Press <b>R</b> to retry</div>';
+  }
+  ov.style.display = 'flex';
+}
+
+// ---------- draw ----------
+function draw() {
+  // floor tiles
+  for (let ty = 0; ty < 18; ty++) for (let tx = 0; tx < 32; tx++) {
+    ctx.fillStyle = (tx + ty) % 2 ? '#141230' : '#171536';
+    ctx.fillRect(tx * 40, ty * 40, 40, 40);
+  }
+  ctx.strokeStyle = 'rgba(90,80,160,.12)'; ctx.lineWidth = 1;
+  for (let i = 0; i <= 32; i++) { ctx.beginPath(); ctx.moveTo(i * 40, 0); ctx.lineTo(i * 40, 720); ctx.stroke(); }
+  for (let i = 0; i <= 18; i++) { ctx.beginPath(); ctx.moveTo(0, i * 40); ctx.lineTo(1280, i * 40); ctx.stroke(); }
+  // shadow zones (hatched)
+  for (const s of SHADOWS) {
+    ctx.fillStyle = 'rgba(6,8,26,.72)'; ctx.fillRect(s.x, s.y, s.w, s.h);
+    ctx.strokeStyle = 'rgba(120,140,220,.28)'; ctx.lineWidth = 2;
+    ctx.save(); ctx.beginPath(); ctx.rect(s.x, s.y, s.w, s.h); ctx.clip();
+    for (let i = -s.h; i < s.w + s.h; i += 14) { ctx.beginPath(); ctx.moveTo(s.x + i, s.y + s.h); ctx.lineTo(s.x + i + s.h, s.y); ctx.stroke(); }
+    ctx.restore();
+    ctx.strokeStyle = '#33407a'; ctx.lineWidth = 1.5; ctx.strokeRect(s.x, s.y, s.w, s.h);
+  }
+  // lamplight pools
+  for (const l of LAMPS) {
+    const g = ctx.createRadialGradient(l.x, l.y, 8, l.x, l.y, l.r);
+    g.addColorStop(0, 'rgba(255,214,120,.34)'); g.addColorStop(1, 'rgba(255,214,120,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(l.x, l.y, l.r, 0, 7); ctx.fill();
+    ctx.fillStyle = '#3a2c10'; ctx.beginPath(); ctx.arc(l.x, l.y, 7, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffd678'; ctx.beginPath(); ctx.arc(l.x, l.y, 4, 0, 7); ctx.fill();
+  }
+  // exit
+  ctx.fillStyle = hasLedger ? '#0d7a37' : '#0a3d20';
+  ctx.fillRect(EXIT.x, EXIT.y, EXIT.w, EXIT.h);
+  ctx.strokeStyle = hasLedger ? '#4be07a' : '#2a7a48'; ctx.lineWidth = 2; ctx.strokeRect(EXIT.x, EXIT.y, EXIT.w, EXIT.h);
+  ctx.fillStyle = hasLedger ? '#b8ffd0' : '#5a9a72'; ctx.font = 'bold 15px Georgia'; ctx.textAlign = 'center';
+  ctx.fillText('EXIT', EXIT.x + EXIT.w / 2, EXIT.y + 26);
+  ctx.font = '18px Georgia'; ctx.fillText(hasLedger ? '➜' : '🔒', EXIT.x + EXIT.w / 2, EXIT.y + 48);
+  // pedestal + ledger
+  ctx.fillStyle = '#4a3a20'; ctx.fillRect(PEDESTAL.x - 22, PEDESTAL.y - 14, 44, 28);
+  ctx.strokeStyle = '#8a6d3b'; ctx.strokeRect(PEDESTAL.x - 22, PEDESTAL.y - 14, 44, 28);
+  if (!hasLedger) {
+    const p = 1 + Math.sin(timeSec * 3) * 0.12;
+    ctx.save(); ctx.translate(PEDESTAL.x, PEDESTAL.y - 26); ctx.rotate(Math.PI / 4); ctx.scale(p, p);
+    ctx.fillStyle = '#f2c14e'; ctx.fillRect(-11, -11, 22, 22);
+    ctx.strokeStyle = '#fff2c0'; ctx.lineWidth = 2; ctx.strokeRect(-11, -11, 22, 22); ctx.restore();
+    ctx.fillStyle = '#ffe9a8'; ctx.font = '11px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('BRASS LEDGER', PEDESTAL.x, PEDESTAL.y + 34);
+  }
+  // coins
+  for (const c of coins) {
+    if (c.taken) continue;
+    ctx.fillStyle = '#f2c14e'; ctx.beginPath(); ctx.arc(c.x, c.y, 9, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#fff2c0'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.fillStyle = '#7a5a10'; ctx.font = 'bold 11px Georgia'; ctx.textAlign = 'center'; ctx.fillText('$', c.x, c.y + 4);
+  }
+  // crates
+  for (const c of CRATES) {
+    ctx.fillStyle = '#5a3d1e'; ctx.fillRect(c.x, c.y, c.w, c.h);
+    ctx.fillStyle = '#6e4c26'; ctx.fillRect(c.x + 4, c.y + 4, c.w - 8, c.h - 8);
+    ctx.strokeStyle = '#8a6d3b'; ctx.lineWidth = 2; ctx.strokeRect(c.x, c.y, c.w, c.h);
+    ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + c.w, c.y + c.h); ctx.moveTo(c.x + c.w, c.y); ctx.lineTo(c.x, c.y + c.h); ctx.stroke();
+  }
+  // walls
+  for (const w of WALLS) {
+    ctx.fillStyle = '#241d4d'; ctx.fillRect(w.x, w.y, w.w, w.h);
+    ctx.fillStyle = '#2e2760'; ctx.fillRect(w.x + 2, w.y + 2, w.w - 4, Math.min(8, w.h - 4));
+    ctx.strokeStyle = '#4a3d8a'; ctx.lineWidth = 1; ctx.strokeRect(w.x, w.y, w.w, w.h);
+  }
+  // vision cones
+  for (const g of guards) {
+    const range = 230, half = 0.56;
+    const col = g.mode === 'chase' ? 'rgba(255,70,60,' : (g.susp > 25 ? 'rgba(255,170,60,' : 'rgba(242,193,78,');
+    ctx.fillStyle = col + '0.20)';
+    ctx.beginPath(); ctx.moveTo(g.x, g.y);
+    ctx.arc(g.x, g.y, range, Math.atan2(g.fy, g.fx) - half, Math.atan2(g.fy, g.fx) + half); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = col + '0.5)'; ctx.lineWidth = 1.5; ctx.stroke();
+  }
+  // smoke
+  if (smokeTimer > 0) {
+    ctx.fillStyle = 'rgba(200,200,210,.35)';
+    ctx.beginPath(); ctx.arc(player.x, player.y, 90, 0, 7); ctx.fill();
+  }
+  // noise rings
+  for (const n of noiseRings) {
+    ctx.strokeStyle = 'rgba(255,255,255,' + Math.max(0, n.a) + ')'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 7); ctx.stroke();
+  }
+  // coin throws
+  for (const t of coinThrows) {
+    ctx.fillStyle = '#f2c14e'; ctx.beginPath(); ctx.arc(t.x, t.y, 6, 0, 7); ctx.fill();
+  }
+  // guards
+  for (const g of guards) {
+    ctx.fillStyle = '#5c1a1a'; ctx.beginPath(); ctx.arc(g.x, g.y, 13, 0, 7); ctx.fill();
+    ctx.strokeStyle = g.mode === 'chase' ? '#ff5040' : '#c0392b'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#2a0d0d'; ctx.beginPath(); ctx.arc(g.x + g.fx * 5, g.y + g.fy * 5, 6, 0, 7); ctx.fill();
+    // suspicion bar + bubble
+    if (g.susp > 2) {
+      ctx.fillStyle = '#000'; ctx.fillRect(g.x - 16, g.y - 30, 32, 5);
+      ctx.fillStyle = g.susp > 55 ? '#ff5040' : '#ffb03a'; ctx.fillRect(g.x - 16, g.y - 30, 32 * g.susp / 100, 5);
+      ctx.fillStyle = g.susp > 55 ? '#ff5040' : '#ffb03a'; ctx.font = 'bold 18px Georgia'; ctx.textAlign = 'center';
+      ctx.fillText(g.susp > 55 ? '!' : '?', g.x, g.y - 34);
+    }
+  }
+  // player
+  ctx.fillStyle = player.sneak ? 'rgba(46,160,170,.25)' : 'rgba(46,200,190,.18)';
+  ctx.beginPath(); ctx.arc(player.x, player.y, 22, 0, 7); ctx.fill();
+  ctx.fillStyle = '#1f8f8a'; ctx.beginPath(); ctx.arc(player.x, player.y, 13, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#aef2e8'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#0d3f3c';
+  ctx.beginPath(); ctx.moveTo(player.x + player.fx * 13, player.y + player.fy * 13);
+  ctx.lineTo(player.x + player.fx * 4 - player.fy * 6, player.y + player.fy * 4 + player.fx * 6);
+  ctx.lineTo(player.x + player.fx * 4 + player.fy * 6, player.y + player.fy * 4 - player.fx * 6);
+  ctx.closePath(); ctx.fill();
+  // callouts
+  ctx.font = 'italic 13px Georgia'; ctx.textAlign = 'left';
+  if (inShadow(player.x, player.y)) drawCallout('YOU: hidden where the cone stops', player.x + 24, player.y - 30, '#b9c8ff');
+  if (guards.some(g => g.susp > 25)) {
+    const g = guards.find(g => g.susp > 25);
+    drawCallout('What was that?', g.x + 26, g.y - 44, '#ffb03a');
+  }
+  if (!hasLedger) drawCallout('LAMPLIGHT: seen from across the room', 140, 255, '#ffe9a8');
+  // vignette
+  const v = ctx.createRadialGradient(640, 360, 300, 640, 360, 780);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.5)');
+  ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  if (paused && !SHOT) {
+    ctx.fillStyle = 'rgba(5,3,12,.6)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#f2c14e'; ctx.font = 'bold 34px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', 640, 360);
+    ctx.fillStyle = '#e8d9a8'; ctx.font = '15px Georgia'; ctx.fillText('Press ESC to resume', 640, 392);
+  }
+}
+function drawCallout(text, x, y, color) {
+  ctx.font = 'italic 13px Georgia';
+  const w = ctx.measureText(text).width + 14;
+  ctx.fillStyle = 'rgba(8,6,20,.88)'; ctx.strokeStyle = color; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y, w, 22, 5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.fillText(text, x + 7, y + 15);
+}
+
+// ---------- shot modes (deterministic) ----------
+function applyShot() {
+  if (SHOT === 'start') {
+    // default fresh state
+  } else if (SHOT === 'suspicious') {
+    player.x = 640; player.y = 380; player.fx = -1; player.fy = 0;
+    const g = guards[0]; g.x = 560; g.y = 380; g.fx = 1; g.fy = 0; g.susp = 65; g.mode = 'investigate'; g.invX = 640; g.invY = 380;
+    suspicion = 65; state = 'susp'; statusText = 'SUSPICIOUS ?';
+  } else if (SHOT === 'hidden') {
+    player.x = 200; player.y = 470; player.fx = 1; player.fy = 0;
+    const g = guards[1]; g.x = 180; g.y = 380; g.fx = 0; g.fy = 1; g.susp = 8;
+    suspicion = 8; state = 'shadow'; statusText = 'IN SHADOW';
+  } else if (SHOT === 'exit') {
+    hasLedger = true; loot = 3;
+    coins[0].taken = true; coins[1].taken = true; coins[2].taken = true;
+    player.x = 1100; player.y = 620; player.fx = 1; player.fy = 0;
+    document.getElementById('objective').innerHTML = 'Ledger secured — reach the <b>EXIT</b> unseen.';
+    timeSec = 127; state = 'hidden'; statusText = 'HIDDEN';
+  }
+  updateHUD();
+}
+
+// ---------- main loop ----------
+function frame(ts) {
+  const dt = Math.min(0.05, (ts - lastTs) / 1000 || 0.016);
+  lastTs = ts;
+  if (!SHOT) update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+freshState();
+applyShot();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
